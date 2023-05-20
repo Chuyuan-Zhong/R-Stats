@@ -1,0 +1,190 @@
+---
+title: "rct_assignment"
+author: "Chuyuan Zhong"
+date: "2023-03-24"
+output: html_document
+---
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+install.packages('fastDummies')
+library(ggplot2)
+library(tidyverse)
+library(miceadds)
+library(lmtest)
+library(multiwayvcov)
+library(AER)
+```
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+school = read.csv('rct_problem_set.csv')
+head(school)
+dim(school)
+```
+
+1. Start by regressing the outcome of interest, attend, on the treatment indicator. What are your preliminary results? How does accounting for the clustered randomization design affect your preliminary results?
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+nonclustered=lm(attend ~ treatment, data = school)
+school$clusters <- paste(school$school_id,"-",school$grade)
+clustered = lm.cluster(attend ~ treatment, data = school, cluster = "clusters")
+summary(nonclustered)
+summary(clustered)
+```
+
+Based on the preliminary results, p-values less than 0.05 that suggests that there is a statistically significant. We can conclude that free lunches randomly provided to selected elementary school students increases the school attendance.
+
+After the clustered randomization design, the standard error is larger than it in the preliminary results, and P value also shows statistically significant. This suggests that we are more confident about the result that free lunches randomly provided to selected elementary school students increases the school attendance. 
+
+2. Check for balance between the treatment and control observations based on age, gender, math scores and reading scores. Are these observables balanced across the treatment and control groups?
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+m_age = lm.cluster(age~treatment, data = school, cluster="clusters")
+m_female = lm.cluster(female~treatment, data = school, cluster="clusters")
+m_math = lm.cluster(math~ treatment, data = school, cluster="clusters")
+m_read = lm.cluster(read~treatment, data = school, cluster="clusters")
+check = lm.cluster(treatment~ age + female + math + read, data = school, cluster="clusters")
+summary(m_age)
+summary(m_female)
+summary(m_math)
+summary(m_read)
+summary(check)
+```
+
+
+- Based on the results, the mean age of non-treated student is about 8, with 0.003 years higher in the treatment group. The results suggest that there seems no statistically significant imbalance of age. 
+
+- About 57.2 % of participants are females in the control group, with 0.2% lower in the treatment group. However, the p-value is 0.07 which is larger than 0.01 but less than 0.05, so there is no substantially significant imbalance of female. 
+
+- The mean math and read scores of participants in the treatment group is slightly higher about 0.13, and the t values are very low. The results suggest that the groups are balanced.
+
+We can further test in by running a f test
+```{r}
+f = linearHypothesis(check, c("age", "female", "math", "read"), test="F")
+f
+```
+
+
+When we run the variables together, we can see that all p values are larger than 0.05. This indicates that there is no statistically significant imbalance of these variables. Therefore, these observables are all balanced across the treatment and control groups.
+
+3. Check if there are observations that are missing outcome data. If there are any, does this attrition appear random or not?
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+sum(is.na(school$attend))
+school$a = ifelse(is.na(school$attend), 1, 0)
+checkattrition = lm(a ~ treatment, data = school)
+summary(checkattrition)
+```
+
+There are 105472 missing outcome data. Since the p value is larger than 0.05, the attrition appear random. 
+
+
+4. Implement a permutation test to assess the credibility of your estimated treatment effect. Include a plot of the distribution of estimates from your permutation samples and mark your estimate based on the actual data in this distribution. What fraction of estimates from your permutation test have higher estimated treatment effects that the estimate based on the actual data? 
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+school <- na.omit(school)
+treatment <- school$treatment
+outcome <- school$attend
+original<-mean(outcome[treatment==1])-mean(outcome[treatment==0])
+```
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+# https://towardsdatascience.com/permutation-test-in-r-77d551a9f891
+permutation.test <- function(treatment, outcome, n){
+  distribution=c()
+  result=0
+  for(i in 1:n){
+    distribution[i]=diff(by(outcome, sample(treatment, length(treatment), FALSE), mean))
+  }
+  result=sum(abs(distribution) >= abs(original))/(n)
+  return(list(result, distribution))
+}
+
+test1 <- permutation.test(treatment, outcome, 1000) 
+hist(test1[[2]], breaks=50, col='blue', main="Permutation Distribution", las=1, xlab='treatment', border = "black", xlim=c(-0.002, 0.06)) 
+abline(v=original, lwd=2, col="red")
+```
+
+Based on the distribution, we can see that the estimated treatment effects are less than the estimates from the actual data. 
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+p_value <- test1[[1]]
+p_value
+```
+
+Since the P value is 0, there is strong evidence to against the null hypothesis,this means there are difference between treatment group and control group.Therefore, there is no fraction of estimates from the permutation test have higher estimated treatment effects that the estimate based on the actual data.  
+
+We can further test it using t-test.
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+t.test(outcome~treatment)
+```
+
+Since P value is less than 0.05, there is a statistically significant and suggests that there is difference in means between treatment=1 and treatment=0. With treatment intervention, the sample estimates for the mean is 0.9903484, without treatment, the sample estimates for the mean is 0.9360750.
+
+
+
+5. Now suppose that you learn that, in addition to being clustered at the school and grade level, you learn that the randomization varied treatment intensity within treatment clusters. The treatcluster variable captures which school-grades were assigned to treatment and which were assigned to control. Within the treated clusters, the clusters were randomly assigned to groups 1, 2, 3, 4 and 5, with the fraction of observations within these clusters assigned to treatment varying from 20%, 40%, 60%, 80% and 100% respectively.
+
+a. To test for peer effects from the treatment, create two sets of indicator
+variables: (1) indicator variables for treatment observations within each treated cluster group and (2) indicator variables for observations within each treated cluster group. Regress the attend outcome variable on these indicators.
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+school <- school %>% 
+    mutate(treat_within_group = if_else(treatcluster_group != 0 & treatment == 1, 1, 0)) %>%
+    mutate(all_within_group = if_else(treatcluster_group != 0, 1, 0))
+
+model_intensity <- lm(attend ~ treat_within_group + all_within_group, data = school)
+
+summary(model_intensity)
+```
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+school1 <- school %>%
+  mutate(treat_group1 = if_else(treatcluster_group == 1 & treatment == 1, 1, 0)) %>%
+  mutate(treat_group2 = if_else(treatcluster_group == 2 & treatment == 1, 1, 0)) %>%
+  mutate(treat_group3 = if_else(treatcluster_group == 3 & treatment == 1, 1, 0)) %>%
+  mutate(treat_group4 = if_else(treatcluster_group == 4 & treatment == 1, 1, 0)) %>%
+  mutate(treat_group5 = if_else(treatcluster_group == 5 & treatment == 1, 1, 0)) %>%
+  mutate(group1 = if_else(treatcluster_group == 1 & treatment == 0, 1, 0)) %>%
+  mutate(group2 = if_else(treatcluster_group == 2 & treatment == 0, 1, 0)) %>%
+  mutate(group3 = if_else(treatcluster_group == 3 & treatment == 0, 1, 0)) %>%
+  mutate(group4 = if_else(treatcluster_group == 4 & treatment == 0, 1, 0)) %>%
+  mutate(group5 = if_else(treatcluster_group == 5 & treatment == 0, 1, 0)) 
+
+model_1 <-lm(attend ~ treat_group1 + treat_group2 + treat_group3 + treat_group4 + treat_group5 + group1 + group2 +group3 +group4 +group5, data = school1)
+summary(model_1)
+```
+
+b. Plot the coefficients on the direct treatment effects (y-axis) against the fraction treated (x-axis). How do the direct treatment effects vary with the fraction treated? 
+
+``` {r , echo=TRUE, message =FALSE, warning=FALSE}
+direct_coeff = coef(model_1)
+
+treatment_intensity <- data.frame(treat_frac = c(0.2, 0.4, 0.6, 0.8, 1),
+                                  direct_coeff = direct_coeff[2:6])
+ggplot(treatment_intensity, aes(x = treat_frac, y = direct_coeff)) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Direct treatment effect vs Fraction treated", x = "fraction treated", y="Direct treatment effect") 
+  
+```
+
+When the treatment fraction is 40%, direct effect reaches the biggest. Overall, there is no significant difference in direct effects across all treatment groups. 
+
+
+c. Plot the coefficients on the indirect treatment effects (y-axis) against the fraction treated (x-axis). How do the indirect treatment effects vary with the fraction treated? Overall, what do you conclude about possible peer effects or spillovers from the treatment?
+
+```{r}
+indirect_coeff = coef(model_1)
+
+treatment_intensity <- data.frame(treat_frac = c(0.2, 0.4, 0.6, 0.8, 1),
+                                  indirect_coeff = indirect_coeff[7:11])
+
+ggplot(treatment_intensity, aes(x = treat_frac, y = indirect_coeff)) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Indirect treatment effect vs Fraction treated", x = "fraction treated", y="Indirect treatment effect")
+```
+
+The indirect effect and the proportion of treated students in groups are positively related. This means that indirect effects increase as more treated students are present in the groups. The effect increases from about 1% to 4% as the proportion of treated students increases from 20% to 80%. This suggests that providing free lunches to selected elementary school students at random increases school attendance. It also suggests that student behavior influences each other and that the attendance of treated students may have influenced the attendance of untreated students, leading to an overall increase in attendance.
+
+
