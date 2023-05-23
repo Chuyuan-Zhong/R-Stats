@@ -1,0 +1,178 @@
+---
+title: "Election analysis"
+output: github_document
+date: "2022-11-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r,message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(R.utils)
+library(tidyr)
+#library(choroplethr)
+#library(choroplethrMaps)
+```
+
+```{r}
+df <- read.csv("/Users/Chuyuan/Downloads/1976-2020-house.csv", stringsAsFactors = FALSE)
+df$GEOID <- paste(df$state_fips, df$district, sep = "")
+df <- select(df, -runoff, -special, -candidate, -unofficial, -version, -writein, -mode, -fusion_ticket)
+df$state<- tolower(df$state)
+df$state<-capitalize(df$state)
+merged2 <- read.csv("/Users/Chuyuan/Downloads/merged2.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+summary(df)
+```
+
+```{r}
+# Country level, partisan turnout from 1976-2020
+single_dists <- c("AK", "DE", "MT", "ND", "SD", "VT", "WY")
+df <- df %>%
+  filter(year >= 2000) %>%
+  filter(!state_po %in% single_dists)
+dem <- df %>%
+  filter(party== "DEMOCRAT")
+rep <- df %>%
+  filter(party== "REPUBLICAN")
+total <- df[!duplicated(df$totalvotes), ]
+
+dv <- aggregate(candidatevotes ~ year, dem, sum)
+rv <- aggregate(candidatevotes ~ year, rep, sum)
+tv <- aggregate(totalvotes ~ year, total, sum)
+rep_dem_total<- dv %>%
+  left_join(rv, by='year') %>% 
+  left_join(tv, by='year')
+df2 <- pivot_longer(rep_dem_total, candidatevotes.y:candidatevotes.x, names_to = "party", values_to = "candidatevotes")
+df2 %>%
+  mutate(vote_pct = candidatevotes/totalvotes) %>%
+  ggplot(aes(x=year, y = vote_pct, colour = party)) + 
+  geom_line(size = 0.5) + 
+  labs(title = "Dem and Rep voter turnout from 1976-2020", x = "year", y = "percentage of vote by party") + 
+  scale_colour_manual(values = c("#56B4E9", "#FF9999"),
+                    guide = guide_legend(reverse = TRUE),
+                    labels=c("dem_pct","rep_pct")) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+df2
+```
+
+
+df3
+
+```{r}
+# State level, all states
+rep_dem <- dplyr::filter(df, grepl('^DEMOCRAT$|^REPUBLICAN$', party)) %>%
+  mutate(vote_pct=candidatevotes/totalvotes)
+
+ggplot(rep_dem, aes(x=year, y=vote_pct, colour=party))+
+  geom_point(size=0.5) +
+  labs(x="year", y="vote_pct")+
+  geom_line() +
+  facet_wrap( ~ state) +
+  labs(title = "Voter turnout change across states from 1976-2020", x = "year", y = "percentage of vote by party") + 
+  scale_colour_manual(values = c("#56B4E9", "#FF9999"),
+                    guide = guide_legend(reverse = TRUE),
+                    labels=c("dem_pct","rep_pct")) +
+  theme(plot.title = element_text(hjust = 0.5),
+        strip.text = element_text(size = 7))
+```
+
+```{r}
+# District level within state, Alabama 
+# calculate the percentage of party in total votes by candidatevotes/totalvotes
+
+ALABAMA <- dplyr::filter(df, grepl('Alabama', state))
+AL <- dplyr::filter(ALABAMA, grepl('^REPUBLICAN$|^DEMOCRAT$', party)) %>%
+  mutate(vote_pct=candidatevotes/totalvotes)
+
+ggplot(AL, aes(x=year, y=vote_pct, colour = party)) +
+  geom_point(size=1)+
+  labs(x="year", y="vote_pct")+
+  geom_line() +
+  facet_wrap(~district, nrow = 3, scales = "free_x") +
+  labs(title = "Voter turnout change across years in each district in Alabama", x = "year", y = "percentage of vote by party") +
+  scale_colour_manual(values = c("#56B4E9", "#FF9999"),
+                    guide = guide_legend(reverse = TRUE),
+                    labels=c("dem_pct","rep_pct")) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+```{r}
+# District level within state, TEXAS 
+
+TEXAS <- dplyr::filter(df, grepl('Texas', state))
+TX <- dplyr::filter(TEXAS, grepl('^DEMOCRAT$|^REPUBLICAN$', party)) %>%
+  mutate(vote_pct=candidatevotes/totalvotes)
+
+ggplot(TX, aes(x=year, y=vote_pct, colour=party))+
+  geom_point(size=0.5) +
+  labs(x="year", y="vote_pct")+
+  geom_line() +
+  facet_wrap( ~ district) +
+  labs(title = "Voter turnout change across years in each district in Texas", x = "year", y = "percentage of vote by party") + 
+  scale_colour_manual(values = c("#56B4E9", "#FF9999"),
+                    guide = guide_legend(reverse = TRUE),
+                    labels=c("dem_pct","rep_pct")) +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+dem <- ggplot(merged2, aes(x = year, y=demv, group = state_po, colour=Institution)) +
+  geom_point() +
+  geom_line()
+dem
+```
+
+```{r}
+rep <- ggplot(merged2, aes(x = year, y = repv, group = state_po, colour = Institution)) +
+  geom_point() + 
+  geom_line()
+rep
+```
+
+
+```{r}
+merged2 %>% group_by(state_po) %>%
+       filter() %>%
+      count(Institution)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+
